@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>VOID RUNNER</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:#000; overflow:hidden;
+    font-family:'Courier New',monospace;
+    touch-action:none; user-select:none; -webkit-user-select:none;
+  }
+  canvas { display:block; image-rendering:pixelated; width:100vw; height:100vh; }
+
+  #hud {
+    position:fixed; top:0; left:0; right:0;
+    display:flex; justify-content:space-between;
+    padding:12px 18px; pointer-events:none; z-index:10;
+  }
+  .hud-box {
+    background:rgba(0,0,0,0.6);
+    border:1px solid rgba(255,200,50,0.4);
+    border-radius:8px; padding:5px 14px;
+    color:#ffd84a; font-size:20px; font-weight:bold; letter-spacing:2px;
+  }
+
+  #minimap {
+    position:fixed; top:12px; right:16px;
+    border:1px solid rgba(255,200,50,0.4);
+    border-radius:6px; opacity:0.88;
+    z-index:10; pointer-events:none;
+    width:112px; height:96px;
+  }
+
+  #dpad {
+    position:fixed; bottom:28px; left:28px;
+    width:230px; height:230px; z-index:20;
+  }
+  .btn {
+    position:absolute; width:72px; height:72px;
+    border-radius:50%;
+    background:rgba(15,15,15,0.85);
+    border:2px solid rgba(255,200,50,0.5);
+    display:flex; align-items:center; justify-content:center;
+    font-size:30px; color:rgba(255,255,255,0.92);
+    box-shadow:0 4px 16px rgba(0,0,0,0.5);
+    -webkit-tap-highlight-color:transparent;
+  }
+  .btn.active {
+    background:rgba(255,200,50,0.9); color:#111;
+    transform:scale(0.92); border-color:#ffd84a;
+    box-shadow:0 0 20px rgba(255,210,50,0.6);
+  }
+  #btn-up    { top:0;    left:79px; }
+  #btn-down  { bottom:0; left:79px; }
+  #btn-left  { top:79px; left:0;   }
+  #btn-right { top:79px; right:0;  }
+
+  #xhair {
+    position:fixed; top:50%; left:50%;
+    transform:translate(-50%,-50%);
+    pointer-events:none; z-index:10;
+  }
+  #xhair::before, #xhair::after {
+    content:''; position:absolute; background:rgba(255,200,50,0.8);
+  }
+  #xhair::before { width:20px; height:2px; top:-1px; left:-10px; }
+  #xhair::after  { width:2px; height:20px; top:-10px; left:-1px; }
+
+  #scan {
+    position:fixed; inset:0; pointer-events:none; z-index:5;
+    background:repeating-linear-gradient(
+      to bottom, transparent, transparent 3px,
+      rgba(0,0,0,0.06) 3px, rgba(0,0,0,0.06) 4px
+    );
+  }
+
+  #splash {
+    position:fixed; inset:0; background:#000;
+    display:flex; flex-direction:column;
+    align-items:center; justify-content:center;
+    z-index:100; gap:16px;
+  }
+  #splash h1 {
+    color:#ffd84a; font-size:clamp(32px,8vw,80px);
+    letter-spacing:10px;
+    text-shadow:0 0 30px #ffd84a,0 0 70px #ffa500aa;
+    animation:glow 2s infinite;
+  }
+  #splash p { color:#888; font-size:clamp(12px,2.5vw,20px); letter-spacing:3px; }
+  #splash p.sub { color:#555; font-size:clamp(11px,1.8vw,15px); }
+  #startBtn {
+    margin-top:24px; padding:18px 56px;
+    background:#ffd84a; color:#111; border:none;
+    border-radius:10px; font-size:clamp(18px,3.5vw,28px);
+    font-family:'Courier New',monospace; font-weight:bold;
+    letter-spacing:5px; cursor:pointer;
+    box-shadow:0 0 28px #ffd84a88;
+    touch-action:manipulation;
+    -webkit-tap-highlight-color:rgba(255,216,74,0.3);
+  }
+  #startBtn:active { transform:scale(0.95); background:#ffbc00; }
+
+  @keyframes glow {
+    0%,100%{text-shadow:0 0 30px #ffd84a,0 0 70px #ffa500aa;}
+    50%{text-shadow:0 0 60px #ffd84a,0 0 120px #ffa500;}
+  }
+</style>
+</head>
+<body>
+
+<div id="splash">
+  <h1>VOID RUNNER</h1>
+  <p>FAKE 3D &nbsp;·&nbsp; TEXTURED RAYCASTING</p>
+  <p class="sub">Gunakan tombol ▲▼◀▶ untuk bergerak</p>
+  <button id="startBtn">▶ &nbsp;MULAI</button>
+</div>
+
+<canvas id="c"></canvas>
+<div id="scan"></div>
+<div id="hud">
+  <div class="hud-box">VOID RUNNER</div>
+  <div class="hud-box" id="fpsBox">FPS: --</div>
+</div>
+<canvas id="minimap"></canvas>
+<div id="xhair"></div>
+<div id="dpad">
+  <div class="btn" id="btn-up">▲</div>
+  <div class="btn" id="btn-down">▼</div>
+  <div class="btn" id="btn-left">◀</div>
+  <div class="btn" id="btn-right">▶</div>
+</div>
+
+<script>
+// ============================================================
+//  VOID RUNNER — Textured Raycasting + Fixed Collision
+// ============================================================
+
+const MAP = [
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,1,1,0,0,0,0,0,0,1,1,0,0,0,0,1,0,0,1],
+  [1,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,1,0,0,1],
+  [1,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,1],
+  [1,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,1,0,0,0,1,1,0,0,0,1,0,0,1,0,0,0,1],
+  [1,0,0,1,0,0,0,1,1,0,0,0,1,0,0,1,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,1],
+  [1,0,1,1,1,0,0,0,0,0,1,1,1,1,0,0,0,1,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+];
+const MW=MAP[0].length, MH=MAP.length;
+
+// ============================================================
+//  CANVAS
+// ============================================================
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+const RW=640, RH=360;
+canvas.width=RW; canvas.height=RH;
+
+const mm    = document.getElementById('minimap');
+const mmCtx = mm.getContext('2d');
+const MS=8;
+mm.width=MW*MS; mm.height=MH*MS;
+
+// ============================================================
+//  PROCEDURAL TEXTURE GENERATOR
+//  Ukuran: 64x64 per tekstur, disimpan sebagai Uint32Array
+// ============================================================
+const TEX_SIZE = 64;
+
+function makeBrickTexture() {
+  const tex = new Uint8ClampedArray(TEX_SIZE * TEX_SIZE * 4);
+  for (let y = 0; y < TEX_SIZE; y++) {
+    for (let x = 0; x < TEX_SIZE; x++) {
+      const i = (y * TEX_SIZE + x) * 4;
+      const brickH = 16, mortarW = 2;
+      const row  = Math.floor(y / brickH);
+      const offX = row % 2 === 0 ? 0 : TEX_SIZE / 2;
+      const lx   = (x + offX) % TEX_SIZE;
+      const ly   = y % brickH;
+      const isMortar = ly < mortarW || lx < mortarW;
+
+      if (isMortar) {
+        tex[i]=140; tex[i+1]=130; tex[i+2]=120; tex[i+3]=255;
+      } else {
+        // Variasi warna bata per baris & kolom
+        const brickX = Math.floor((x + offX) / (TEX_SIZE / 2 - mortarW));
+        const noise  = ((row * 7 + brickX * 13) % 30) - 15;
+        tex[i]  = Math.min(255, 180 + noise);
+        tex[i+1]= Math.min(255, 90  + noise * 0.5);
+        tex[i+2]= Math.min(255, 60  + noise * 0.3);
+        tex[i+3]= 255;
+        // Crack / detail
+        if (lx === TEX_SIZE/4 && ly > 4 && ly < brickH-4) {
+          tex[i]=100; tex[i+1]=55; tex[i+2]=40;
+        }
+      }
+    }
+  }
+  return tex;
+}
+
+function makeStoneTexture() {
+  const tex = new Uint8ClampedArray(TEX_SIZE * TEX_SIZE * 4);
+  for (let y = 0; y < TEX_SIZE; y++) {
+    for (let x = 0; x < TEX_SIZE; x++) {
+      const i = (y * TEX_SIZE + x) * 4;
+      // Pseudo-random noise untuk batu
+      const n = ((x * 1234 + y * 5678 + x*y*13) ^ (x << 3) ^ (y << 5)) & 0xFF;
+      const base = 80 + (n % 60);
+      tex[i]  = base + 10;
+      tex[i+1]= base;
+      tex[i+2]= base - 10;
+      tex[i+3]= 255;
+      // Grout lines tiap 20px
+      if (x % 20 < 2 || y % 20 < 2) {
+        tex[i]=55; tex[i+1]=52; tex[i+2]=50; tex[i+3]=255;
+      }
+    }
+  }
+  return tex;
+}
+
+function makeFloorTexture() {
+  const tex = new Uint8ClampedArray(TEX_SIZE * TEX_SIZE * 4);
+  for (let y = 0; y < TEX_SIZE; y++) {
+    for (let x = 0; x < TEX_SIZE; x++) {
+      const i = (y * TEX_SIZE + x) * 4;
+      const tile = (Math.floor(x/16) + Math.floor(y/16)) % 2;
+      const base = tile ? 55 : 40;
+      const n    = ((x*31+y*17)^(x^y)) & 0xF;
+      tex[i]  = base + n;
+      tex[i+1]= base + n - 5;
+      tex[i+2]= base + n - 10;
+      tex[i+3]= 255;
+    }
+  }
+  return tex;
+}
+
+function makeCeilTexture() {
+  const tex = new Uint8ClampedArray(TEX_SIZE * TEX_SIZE * 4);
+  for (let y = 0; y < TEX_SIZE; y++) {
+    for (let x = 0; x < TEX_SIZE; x++) {
+      const i = (y * TEX_SIZE + x) * 4;
+      const n = ((x*53+y*97)^(x*y)) & 0x1F;
+      tex[i]=12+n; tex[i+1]=12+n; tex[i+2]=30+n*2; tex[i+3]=255;
+    }
+  }
+  return tex;
+}
+
+// Pre-generate semua tekstur
+const TEX_BRICK = makeBrickTexture();
+const TEX_STONE = makeStoneTexture();
+const TEX_FLOOR = makeFloorTexture();
+const TEX_CEIL  = makeCeilTexture();
+
+// Helper: ambil warna dari tekstur
+function texSample(tex, tx, ty) {
+  const xi = Math.min(TEX_SIZE-1, Math.max(0, tx | 0));
+  const yi = Math.min(TEX_SIZE-1, Math.max(0, ty | 0));
+  const i  = (yi * TEX_SIZE + xi) * 4;
+  return [tex[i], tex[i+1], tex[i+2]];
+}
+
+// ============================================================
+//  PLAYER
+// ============================================================
+let px=1.5, py=1.5, pa=0;
+const MSPD=0.05, RSPD=0.04;
+const FOV=Math.PI/3, HFOV=FOV/2;
+const HH=RH/2;
+
+// ============================================================
+//  PIXEL BUFFER
+// ============================================================
+const img = ctx.createImageData(RW, RH);
+const buf = img.data;
+
+// ============================================================
+//  COLLISION — FIXED (lebih ketat)
+// ============================================================
+function isWall(x, y) {
+  const mx = x | 0;
+  const my = y | 0;
+  if (mx < 0 || mx >= MW || my < 0 || my >= MH) return true;
+  return MAP[my][mx] === 1;
+}
+
+function tryMove(nx, ny) {
+  const mg = 0.35; // margin lebih besar → tidak bisa nembus
+  let ox = px, oy = py;
+
+  // Cek X
+  if (!isWall(nx + (nx > ox ? mg : -mg), oy + mg) &&
+      !isWall(nx + (nx > ox ? mg : -mg), oy - mg)) {
+    ox = nx;
+  }
+  // Cek Y
+  if (!isWall(ox + mg, ny + (ny > oy ? mg : -mg)) &&
+      !isWall(ox - mg, ny + (ny > oy ? mg : -mg))) {
+    oy = ny;
+  }
+
+  px = ox; py = oy;
+}
+
+// ============================================================
+//  RENDER — TEXTURED
+// ============================================================
+function render() {
+  // --- Langit & Lantai (floor/ceiling casting) ---
+  const cosPA = Math.cos(pa), sinPA = Math.sin(pa);
+
+  for (let y = 0; y < RH; y++) {
+    if (y === HH | 0) continue;
+    const isFloor = y > HH;
+
+    // Arah ray kiri dan kanan
+    const rayDirX0 = cosPA - Math.cos(pa - HFOV);
+    const rayDirY0 = sinPA - Math.sin(pa - HFOV);
+    const rayDirX1 = cosPA - Math.cos(pa + HFOV) * -1;
+    const rayDirY1 = sinPA - Math.sin(pa + HFOV) * -1;
+
+    const lrX0 = Math.cos(pa - HFOV);
+    const lrY0 = Math.sin(pa - HFOV);
+    const lrX1 = Math.cos(pa + HFOV);
+    const lrY1 = Math.sin(pa + HFOV);
+
+    const rowDist = isFloor
+      ? HH / (y - HH + 0.001)
+      : HH / (HH - y + 0.001);
+
+    const stepX = rowDist * (lrX1 - lrX0) / RW;
+    const stepY = rowDist * (lrY1 - lrY0) / RW;
+
+    let fx = px + rowDist * lrX0;
+    let fy = py + rowDist * lrY0;
+
+    const shade = isFloor
+      ? Math.max(0.2, 1 - (y - HH) / HH)
+      : Math.max(0.1, (HH - y) / HH * 0.5);
+
+    for (let x = 0; x < RW; x++) {
+      const tx = ((fx % 1 + 1) % 1 * TEX_SIZE) | 0;
+      const ty = ((fy % 1 + 1) % 1 * TEX_SIZE) | 0;
+      const [r,g,b] = texSample(isFloor ? TEX_FLOOR : TEX_CEIL, tx, ty);
+      const i = (y * RW + x) * 4;
+      buf[i]   = r * shade | 0;
+      buf[i+1] = g * shade | 0;
+      buf[i+2] = b * shade | 0;
+      buf[i+3] = 255;
+      fx += stepX; fy += stepY;
+    }
+  }
+
+  // --- Dinding (raycasting dengan tekstur) ---
+  for (let col = 0; col < RW; col++) {
+    const ra  = (pa - HFOV) + (col / RW) * FOV;
+    const ca  = Math.cos(ra), sa = Math.sin(ra);
+
+    let mx = px | 0, my = py | 0;
+    const ddx = Math.abs(ca < 1e-10 && ca > -1e-10 ? 1e30 : 1/ca);
+    const ddy = Math.abs(sa < 1e-10 && sa > -1e-10 ? 1e30 : 1/sa);
+
+    let sx, lx, sy, ly;
+    if (ca<0){sx=-1;lx=(px-mx)*ddx;}else{sx=1;lx=(mx+1-px)*ddx;}
+    if (sa<0){sy=-1;ly=(py-my)*ddy;}else{sy=1;ly=(my+1-py)*ddy;}
+
+    let hit=false, side=0, depth=0;
+    while (!hit && depth<25) {
+      if (lx<ly){lx+=ddx;mx+=sx;side=0;}
+      else{ly+=ddy;my+=sy;side=1;}
+      depth++;
+      if (mx>=0&&mx<MW&&my>=0&&my<MH&&MAP[my][mx]===1) hit=true;
+    }
+
+    if (!hit) continue;
+
+    let dist = side===0 ? lx-ddx : ly-ddy;
+    dist *= Math.cos(ra-pa);
+    if (dist < 0.05) dist = 0.05;
+
+    // Hitung wallX (posisi hit pada permukaan tembok)
+    let wallX;
+    if (side===0) wallX = py + dist * sa;
+    else          wallX = px + dist * ca;
+    wallX -= Math.floor(wallX);
+
+    // Pilih tekstur berdasarkan side
+    const tex = side===0 ? TEX_BRICK : TEX_STONE;
+    const texX = (wallX * TEX_SIZE) | 0;
+
+    const wallH = (RH * 0.65 / dist) | 0;
+    const top   = Math.max(0, (HH - wallH/2) | 0);
+    const bot   = Math.min(RH-1, (HH + wallH/2) | 0);
+    const shade = Math.min(1, 1 / (dist * 0.35 + 0.5));
+    const dark  = side===1 ? 0.6 : 1.0; // sisi vertical lebih gelap
+
+    const step    = TEX_SIZE / wallH;
+    let texYFloat = (top - HH + wallH/2) * step;
+
+    for (let y=top; y<=bot; y++) {
+      const texY = Math.min(TEX_SIZE-1, texYFloat | 0);
+      texYFloat += step;
+      const [r,g,b] = texSample(tex, texX, texY);
+      const i = (y*RW+col)*4;
+      buf[i]   = r * shade * dark | 0;
+      buf[i+1] = g * shade * dark | 0;
+      buf[i+2] = b * shade * dark | 0;
+      buf[i+3] = 255;
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
+}
+
+// ============================================================
+//  MINIMAP
+// ============================================================
+function drawMM() {
+  mmCtx.clearRect(0,0,mm.width,mm.height);
+  mmCtx.fillStyle='rgba(0,0,0,0.7)';
+  mmCtx.fillRect(0,0,mm.width,mm.height);
+  for(let ry=0;ry<MH;ry++)
+    for(let rx=0;rx<MW;rx++){
+      mmCtx.fillStyle=MAP[ry][rx]?'#b8a890':'#1e1e1e';
+      mmCtx.fillRect(rx*MS,ry*MS,MS-1,MS-1);
+    }
+  const ppx=px*MS,ppy=py*MS;
+  mmCtx.fillStyle='#ff4444';
+  mmCtx.beginPath();mmCtx.arc(ppx,ppy,4,0,Math.PI*2);mmCtx.fill();
+  mmCtx.strokeStyle='#ffd84a';mmCtx.lineWidth=1.5;
+  mmCtx.beginPath();mmCtx.moveTo(ppx,ppy);
+  mmCtx.lineTo(ppx+Math.cos(pa)*16,ppy+Math.sin(pa)*16);
+  mmCtx.stroke();
+}
+
+// ============================================================
+//  CONTROLS
+// ============================================================
+const keys={}, touch={up:false,down:false,left:false,right:false}, fmap={};
+
+function move() {
+  const up   =keys['ArrowUp']  ||keys['w']||touch.up;
+  const down =keys['ArrowDown']||keys['s']||touch.down;
+  const left =keys['ArrowLeft']||keys['a']||touch.left;
+  const right=keys['ArrowRight']||keys['d']||touch.right;
+  if(left) pa-=RSPD;
+  if(right)pa+=RSPD;
+  const dx=Math.cos(pa)*MSPD, dy=Math.sin(pa)*MSPD;
+  let nx=px, ny=py;
+  if(up){nx+=dx;ny+=dy;}
+  if(down){nx-=dx;ny-=dy;}
+  tryMove(nx,ny);
+}
+
+// FPS
+let frames=0,lastT=performance.now();
+const fpsBox=document.getElementById('fpsBox');
+function updateFPS(now){
+  frames++;
+  if(now-lastT>=500){
+    const f=Math.round(frames*1000/(now-lastT));
+    fpsBox.textContent='FPS: '+f;
+    fpsBox.style.color=f>=50?'#5fffaa':f>=30?'#ffd84a':'#ff5555';
+    frames=0;lastT=now;
+  }
+}
+
+// Game loop
+let running=false;
+function loop(now){
+  if(!running)return;
+  move();render();drawMM();updateFPS(now);
+  requestAnimationFrame(loop);
+}
+
+// Splash
+const startBtn=document.getElementById('startBtn');
+const splash=document.getElementById('splash');
+function startGame(){
+  if(!running){
+    splash.style.display='none';
+    running=true;
+    requestAnimationFrame(loop);
+  }
+}
+startBtn.addEventListener('click',startGame);
+startBtn.addEventListener('touchstart',e=>{e.preventDefault();startGame();},{passive:false});
+
+// Keyboard
+document.addEventListener('keydown',e=>{keys[e.key]=true;});
+document.addEventListener('keyup',  e=>{keys[e.key]=false;});
+
+// D-Pad
+const btnEls={
+  up:document.getElementById('btn-up'),
+  down:document.getElementById('btn-down'),
+  left:document.getElementById('btn-left'),
+  right:document.getElementById('btn-right'),
+};
+function getBtn(x,y){
+  for(const[n,el] of Object.entries(btnEls)){
+    const r=el.getBoundingClientRect();
+    if(x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom)return n;
+  }
+  return null;
+}
+function setBtn(n,v){
+  if(!n)return;
+  touch[n]=v;
+  btnEls[n].classList.toggle('active',v);
+}
+document.addEventListener('touchstart',e=>{
+  e.preventDefault();
+  for(const t of e.changedTouches){
+    const b=getBtn(t.clientX,t.clientY);
+    if(b){setBtn(b,true);fmap[t.identifier]=b;}
+  }
+},{passive:false});
+document.addEventListener('touchend',e=>{
+  e.preventDefault();
+  for(const t of e.changedTouches){
+    setBtn(fmap[t.identifier],false);
+    delete fmap[t.identifier];
+  }
+},{passive:false});
+document.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  for(const t of e.changedTouches){
+    const ob=fmap[t.identifier],nb=getBtn(t.clientX,t.clientY);
+    if(ob!==nb){setBtn(ob,false);setBtn(nb,true);fmap[t.identifier]=nb;}
+  }
+},{passive:false});
+</script>
+</body>
+</html>
